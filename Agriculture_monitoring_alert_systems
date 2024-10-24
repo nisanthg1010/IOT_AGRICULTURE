@@ -1,0 +1,147 @@
+
+#include <EEPROM.h>
+
+#define BLYNK_TEMPLATE_ID "TMPL3Awfup9lc"
+#define BLYNK_TEMPLATE_NAME "Agriculture Monitoring"
+#define BLYNK_AUTH_TOKEN "YopmHa8NFZ1VIWQ3beRxhUXW5EuGNGHK"
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <SimpleKalmanFilter.h> // For filtering TDS readings (optional)
+// Sensor pins and variables
+const int lm35Pin = 34;
+const int hcSr04TriggerPin = 33;
+const int hcSr04EchoPin = 35;
+const int moistureSensorPin = 13;
+const int relayPin = 5; // Pin connected to the relay
+const int relayPin2 = 4; // Pin connected to the relay
+const int relayPin3 = 19; // Pin connected to the relay
+const int tdsSensorPin = 32; // Replace with the actual pin you're using
+float temperature, distance, moisture;
+// Blynk virtual pins
+const int vPinTemp = V0;
+const int vPinDistance = V1;
+const int vPinMoisture = V2;
+const int vPinTDS = V3; // Assuming V0, V1, and V2 are already used
+// Wi-Fi and Blynk credentials
+char auth[] = "YopmHa8NFZ1VIWQ3beRxhUXW5EuGNGHK";
+char ssid[] = "Nisanth";
+char pass[] = "Nisanth";
+void setup() {
+  Serial.begin(9600);
+  Blynk.begin(auth, ssid, pass);
+  pinMode(tdsSensorPin, INPUT);
+  // Pin setup for sensors and relay
+  pinMode(lm35Pin, INPUT);
+  pinMode(hcSr04TriggerPin, OUTPUT);
+  pinMode(hcSr04EchoPin, INPUT);
+  pinMode(moistureSensorPin, INPUT);
+  pinMode(relayPin, OUTPUT);
+  pinMode(relayPin2, OUTPUT);
+   // pinMode(relayPin2, OUTPUT);
+  pinMode(relayPin3, OUTPUT);
+}
+void loop() {
+  Blynk.run();
+  // Read sensor values
+  temperature = readTemperature();
+  distance = readDistance();
+  moisture = readMoisture();
+  float tdsValue = readTDS();
+  // Send sensor readings to Blynk
+  Blynk.virtualWrite(vPinTemp, temperature);
+  Blynk.virtualWrite(vPinDistance, distance);
+  Blynk.virtualWrite(vPinMoisture, moisture);
+  Blynk.virtualWrite(vPinTDS, tdsValue);
+  Blynk.virtualWrite(V4,HIGH);
+  // Control the motor based on water level
+  if (distance < 5) { // Water level is low
+    digitalWrite(relayPin, HIGH); // Turn on the motor
+    Serial.println("Motor ON (water level low)");
+    //delay(500);
+    digitalWrite(relayPin3, HIGH); // Turn off the motor
+  } else { 
+    digitalWrite(relayPin, LOW); // Turn off the motor
+    Serial.println("Motor OFF");
+        delay(500);
+    digitalWrite(relayPin3, LOW); // Turn off the motor
+  }
+   if (moisture != 100) { // Water level is low
+    digitalWrite(relayPin2, HIGH); // Turn on the motor
+    Serial.println("Motor 2 ON low moister level");
+        delay(500);
+    digitalWrite(relayPin3, HIGH); // Turn off the motor
+  } else { 
+    digitalWrite(relayPin2, LOW); // Turn off the motor
+    Serial.println("Motor 2 OFF");
+    delay(500);
+    digitalWrite(relayPin3, LOW); // Turn off the motor
+  }
+  if (digitalRead(relayPin) == HIGH) {
+  Blynk.logEvent("tank_motor", "Tank motor on");
+} else if (digitalRead(relayPin2) == HIGH) {
+  Blynk.logEvent("field_motor", "Field motor on");
+}
+ if (moisture == 100) {
+  Blynk.logEvent("soil", "Your soil is dry");
+} else {
+  Blynk.logEvent("soil", "Soil is wet");
+}
+if (tdsValue > 0 || tdsValue < 500 ) {
+  Blynk.logEvent("tds", "TDS level in water is normal");
+} else if(tdsValue > 500 || tdsValue < 1000){
+  Blynk.logEvent("tds", "Low TDS detected in water");
+}
+  else{
+    Blynk.logEvent("tds", "High TDS in water");
+  }
+  if (temperature >15 || temperature < 25) {
+  Blynk.logEvent("temperature", " Soil temperature is optimal,Range: 15°C to 25°C (59°F to 77°F)."
+);
+} else if (temperature >25 || temperature < 30) {
+  Blynk.logEvent("temperature", "Soil is warm.Range: 25°C to 30°C (77°F to 86°F).");
+}
+else if ((temperature >31 || temperature < 35))
+{
+   Blynk.logEvent("temperature", "Soil is too hot.Range: Above 30°C (86°F)");
+}
+  delay(500); // Update readings every second
+}
+// Blynk virtual pins
+float readDistance() {
+  digitalWrite(hcSr04TriggerPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(hcSr04TriggerPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(hcSr04TriggerPin, LOW);
+  long duration = pulseIn(hcSr04EchoPin, HIGH);
+  float distanceCm = duration * 0.034 / 2.0; // Speed of sound in cm/μs
+  Serial.print("distance: ");
+  Serial.println(distanceCm);
+    return distanceCm;
+}
+float readMoisture() {
+  int sensorValue = digitalRead(moistureSensorPin); // Use digitalRead() now
+  int moistureLevel = sensorValue == HIGH ? 100 : 0; // Map to 0 or 100 based on digital value
+  // Display moisture value in serial monitor
+  Serial.print("Moisture: ");
+  Serial.println(moistureLevel);
+  return moistureLevel;
+}
+float readTemperature() {
+  int sensorValue = analogRead(lm35Pin);
+  float voltage = sensorValue * (5.0 / 1024.0); // Convert analog reading to voltage
+  float temperatureCelsius = (voltage * 20.0) - 7; // Convert voltage to temperature (°C)
+   Serial.print("Temperature: ");
+  Serial.println(temperatureCelsius);
+  return temperatureCelsius; 
+}
+float readTDS() {
+    // Read raw analog value from the sensor
+    int sensorValue = analogRead(tdsSensorPin);
+    // Apply calibration or conversion formula (if needed)
+    float tdsValue = sensorValue * (400.0 / 1024.0); // Example conversion
+    // Optional: Filter the readings using a Kalman filter
+    SimpleKalmanFilter tdsFilter(1, 1, 0.01);
+    tdsValue = tdsFilter.updateEstimate(tdsValue);
+    return tdsValue;
+}
